@@ -60,7 +60,9 @@ meta <-
       Day == "8.7.21" ~ "Day 9",
       Day == "9.7.21" ~ "Day 10", 
       Day == "10.7.21" ~ "Day 11",
-      Day == "11.7.21" ~ "Day 12", 
+      Day == "11.7.21" ~ "Day 12",
+      Day == "12.7.21" ~ "Day 13",
+      Day == "13.7.21" ~ "Day 14"
     ) %>% 
       as.factor(), 
     Time = as.factor(Time), 
@@ -72,7 +74,8 @@ meta <-
 final_data <- read_csv("naglu_3m_final_output.csv") %>% 
   dplyr::select(-1) %>% 
   mutate(fish_id = factor(fish_id)) %>% 
-  left_join(meta)
+  left_join(meta) %>% 
+  dplyr::filter(Keep == "Y") 
 ```
 
 # Introduction
@@ -92,7 +95,7 @@ final_data %>%
 
 # check genotype proportions
 
-First, I will check that genotype proportions are as expected. A few less homs are observed
+First, I will check that genotype proportions are as expected. A few less homs are observed than expected.
 ```{r}
 meta %>% 
   ggplot(aes(Genotype, fill = Genotype)) +
@@ -124,10 +127,43 @@ final_data %>%
 ```
 
 
-
 # Visualisation of raw data
 
 Cleal et al. showed that zebrafish naturally perform more of the alternation tetragrams (LRLR and RLRL) in a Y-maze. This is obsevred in our data. 
+
+```{r}
+final_data %>% 
+  gather(key = 'tetras', value = 'count', grep("[L|R]{4}", colnames(.))) %>% 
+  group_by(fish_id, tetras) %>% 
+  mutate(totalpertetra = sum(count)) %>% 
+  dplyr::distinct(totalpertetra, .keep_all = T) %>% 
+  ggplot(aes(x = tetras, y = totalpertetra)) +
+  geom_jitter(aes(colour = tetras, 
+                  shape = Sex)) +
+  geom_boxplot(outlier.shape = NA, 
+               aes(fill = Genotype)) +
+  scale_fill_viridis_d() +
+  coord_cartesian(ylim = c(0,200)) +
+  labs(y = "Number of tetragrams", 
+       colour = "Tetragram", 
+       x = "Tetragram")+
+  theme(legend.position = "bottom") 
+```
+
+```{r}
+final_data %>% 
+  gather(key = 'tetras', value = 'count', grep("[L|R]{4}", colnames(.))) %>% 
+  dplyr::distinct(rel_alts, .keep_all = T) %>%
+  ggplot(aes(x = Genotype, y = alts, fill = Genotype)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(aes(shape = Sex)) +
+  facet_wrap(~bin, nrow = 1) +
+  theme_bw() +
+  theme(axis.text.x  = element_text(angle = 45, hjust = 1, vjust = 1)) +
+  ylab("Frequency of alternation tetragrams (LRLR + RLRL)") +
+  coord_cartesian(ylim = c(0, 100)) + # zoom in
+  scale_fill_viridis_d()
+```
 
 
 We can also display this as the *relative* amount of alternation tetragrams performed by zebrafish in a 1 hour search period. This will control for how active each fish is. 
@@ -159,10 +195,11 @@ final_data %>%
   dplyr::select(colnames(meta), sum_turns) %>% 
   unique %>% 
   ggplot(aes(x = Genotype,y = sum_turns)) +
-  geom_quasirandom(aes(shape = Sex)) +
-  geom_boxplot(aes(fill = Genotype), 
+  geom_violin(aes(fill = Genotype), 
                alpha = 0.5, 
-               outlier.shape = NA) + # dont show the outliers
+               draw_quantiles = c(0.25,0.5,0.75)) + 
+  geom_quasirandom(aes(shape = Sex)) +
+  coord_cartesian(ylim = c(0,1000)) +
   scale_fill_viridis_d() +
   ylab("Total number of turns") +
   ggtitle("Total number of turns performed by fish in the Y-maze in 1 hour")
@@ -181,7 +218,7 @@ final_data %>%
         None of the factors have a significant effect on the total number of turns" ) %>% 
   kable_styling()
 
-read_csv("naglu 3-month behaviour/naglu_3m_time_in_zone.csv") %>% 
+read_csv("naglu_3m_time_in_zone.csv") %>% 
   mutate(fish_id = as.character(fish_id)) %>% 
   dplyr::select(fish_id, bin, zone, time_in_zone) %>% 
   left_join(meta) %>% 
@@ -197,11 +234,11 @@ read_csv("naglu 3-month behaviour/naglu_3m_time_in_zone.csv") %>%
                 alpha = 0.5) +
   facet_wrap(~zone, nrow = 1) +
   scale_y_log10() +
-  ylab("Total time spent in each zone (mins)") +
+  ylab("Total time spent in each zone (mins, log scale)") +
   scale_fill_viridis_d() +
   ggtitle("Total time spent in each zone")
 
-read_csv("naglu 3-month behaviour/naglu_3m_time_in_zone.csv") %>% 
+read_csv("naglu_3m_time_in_zone.csv") %>% 
   mutate(fish_id = as.character(fish_id)) %>% 
   dplyr::select(fish_id, bin, zone, time_in_zone) %>% 
   left_join(meta) %>% 
@@ -218,10 +255,10 @@ read_csv("naglu 3-month behaviour/naglu_3m_time_in_zone.csv") %>%
   facet_wrap(~zone, nrow = 1) +
   scale_fill_viridis_d() +
   scale_y_log10() +
-  ylab("Average time spent in each zone") +
+  ylab("Average time spent in each zone (seconds, log scale") +
   ggtitle("Average time spent in each zone")
 
-read_csv("naglu 3-month behaviour/naglu_3m_time_in_zone.csv") %>% 
+read_csv("naglu_3m_time_in_zone.csv") %>% 
   mutate(fish_id = as.character(fish_id)) %>% 
   dplyr::select(fish_id, bin, zone, time_in_zone) %>% 
   left_join(meta) %>% 
@@ -237,46 +274,58 @@ read_csv("naglu 3-month behaviour/naglu_3m_time_in_zone.csv") %>%
   kable_styling()
 ```
 
-
-
+## check for handedness
 ```{r}
-#also visualise the alternations per bin per fish
-final_data %>% 
-  dplyr::filter(Keep == "Y") %>% 
-  gather(key = 'tetras', value = 'count', grep("[L|R]{4}", colnames(.))) %>% 
-  dplyr::distinct(rel_alts, .keep_all = T) %>%
-  ggplot(aes(x = Genotype, y = alts, fill = Genotype)) +
-  geom_boxplot(outlier.shape = NA) +
-  geom_jitter(aes(shape = Sex)) +
-  facet_wrap(~bin, nrow = 1) +
-  theme_bw() +
-  theme(axis.text.x  = element_text(angle = 45, hjust = 1, vjust = 1)) +
-  ylab("Frequency of alternation tetragrams (LRLR + RLRL)") +
-  coord_cartesian(ylim = c(0, 100)) + # zoom in
-  scale_fill_viridis_d()
+LR_Bias <- final_data %>% 
+  dplyr::select(L, R, total_turns, fish_id) %>% 
+  group_by(fish_id) %>% 
+  mutate(L = sum(L), 
+         R = sum(R), 
+         total_turns = sum(total_turns),
+         L_R_bias = case_when( #consider more than 60% of the time performing a left or right turn to be a bias
+           L/total_turns > 0.6 ~ "Left", 
+           R/total_turns > 0.6 ~ "Right", 
+           TRUE ~ "Neither"
+         )) %>% 
+  dplyr::select(fish_id, L_R_bias) %>% 
+  unique() %>% 
+  mutate(L_R_bias = factor(L_R_bias, 
+                           levels = c("Neither", "Left", "Right"))
+  )
 ```
 
 
+## test for changes to alternation 
 
 ```{r}
-temp <- final_data %>% 
+glm <- 
+  final_data %>% 
   dplyr::filter(Keep == "Y") %>% 
+  left_join(LR_Bias) %>% 
   mutate(
     dayTime = interaction(Day, Time, drop = T),
     non_alts = total_turns - alts,
-    obs = 1:nrow(.),
-    bin = as.character(bin)
+    bin = as.factor(bin)
   ) %>% 
   glmmTMB(
-    cbind(alts, non_alts) ~ (bin + Genotype)^2 + Time + Sex + (1|Day) + (1|fish_id) + (1|dayTime),
+    cbind(alts, non_alts) ~ (bin + Genotype)^2 + Time + Sex + (1|Day) + (1|fish_id) + (1|dayTime) + L_R_bias,
     family = betabinomial(),
     data = .
   ) 
 
-Anova(temp)
+Anova(glm) %>% 
+  as.data.frame() %>% 
+  dplyr::rename(pval = `Pr(>Chisq)`) %>% 
+  kable() %>% 
+  kable_styling()
   
-print(emmeans(temp, specs = "Genotype"),type = "response") %>% 
+print(emmeans(glm, specs = "Genotype"), type = "response") %>% 
   as_tibble() %>% 
+  mutate(Genotype = 
+           case_when(
+             Genotype == "wt" ~ "+/+", 
+             Genotype == "het" ~ "A603fs/+", 
+             Genotype == "hom" ~ "A603fs/A603fs")) %>% 
   ggplot(aes(Genotype, prob, colour = Genotype)) +
   geom_point(size = 5, 
              position = position_dodge(width = 0.5)) +
@@ -294,10 +343,35 @@ print(emmeans(temp, specs = "Genotype"),type = "response") %>%
                                vjust = 1, 
                                angle = 45)
     ) +
+  scale_y_continuous(limits = c(0,0.4)) +
+  scale_color_viridis_d(end = 0.8, option = "inferno") +
+  ggtitle("GLM predicted probability of zebrafish performing an alternation\ntetragram at 3 months of age", 
+          subtitle = "Effect of Genotype p = 0.058")
+
+print(emmeans(glm, specs = "L_R_bias"), type = "response") %>% 
+  as_tibble() %>% 
+  ggplot(aes(L_R_bias, prob, colour = L_R_bias)) +
+  geom_point(size = 5, 
+             position = position_dodge(width = 0.5)) +
+  geom_errorbar(
+    aes(ymin = lower.CL, ymax = upper.CL), 
+    width = 0.5,
+    size = 1,
+    position = position_dodge(width = 0.5)
+    ) +
+  ylab("Estimated probability of alternation") +
+  xlab("Time interval") +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(hjust = 1, 
+                               vjust = 1, 
+                               angle = 45)
+    ) +
+  scale_y_continuous(limits = c(0,0.4)) +
   ggtitle("naglu 3 months", 
           subtitle = "Effect of Genotype p = 0.07")
 
-print(emmeans(temp, specs = "bin", by = "Genotype"), type = "response") %>% 
+print(emmeans(glm, specs = "bin", by = "Genotype"), type = "response") %>% 
   as_tibble() %>% 
   ggplot(aes(bin, prob, colour = Genotype)) +
   geom_point(size = 2, 
