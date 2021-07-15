@@ -1,0 +1,322 @@
+---
+title: "naglu 3 month behaviour"
+author: "Karissa"
+date: "14/07/2021"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+## packages
+```{r}
+library(tidyverse)
+library(readxl)
+library(here)
+library(magrittr)
+library(scales)
+library(readxl)
+library(ggpubr)
+library(ggeasy)
+library(ggfortify)
+library(ggbeeswarm)
+library(kableExtra)
+
+# stat analysis
+library(broom)
+library(lme4)
+library(performance)
+library(car)
+library(emmeans)
+library(glmmTMB)
+library(MASS)
+
+theme_set(theme_bw())
+```
+## read in data
+```{r}
+# read in Ewans metadata spreadhseet
+meta <- 
+  read_excel("naglu 3 month behavioural metadata.xlsx") %>% 
+  dplyr::rename(
+    fish_id = 1, 
+    Tank = `Tank/Lay`, 
+    Keep = `Keep (yes, no, maybe`
+  ) %>% 
+  mutate(
+    fish_id = as.factor(fish_id), 
+    Day = case_when(# probably a nicer way to do this but oh well. 
+      Day == "30.6.21" ~ "Day 1", 
+      Day == "1.7.21" ~ "Day 2", 
+      Day == "2.7.21" ~ "Day 3", 
+      Day == "3.7.21" ~ "Day 4", 
+      Day == "4.7.21" ~ "Day 5", 
+      Day == "5.7.21" ~ "Day 6", 
+      Day == "6.7.21" ~ "Day 7", 
+      Day == "7.7.21" ~ "Day 8",
+      Day == "8.7.21" ~ "Day 9",
+      Day == "9.7.21" ~ "Day 10", 
+      Day == "10.7.21" ~ "Day 11",
+      Day == "11.7.21" ~ "Day 12", 
+    ) %>% 
+      as.factor(), 
+    Time = as.factor(Time), 
+    Tank = as.factor(Tank), 
+    Sex = as.factor(Sex), 
+    Genotype = factor(Genotype, levels = c("wt", "het", "hom"))
+  )
+
+final_data <- read_csv("naglu_3m_final_output.csv") %>% 
+  dplyr::select(-1) %>% 
+  mutate(fish_id = factor(fish_id)) %>% 
+  left_join(meta)
+```
+
+# Introduction
+
+In this analysis, I will analyse Ewans raw data generated for zebrafish arising from a *naglu* A603fs het x het lay in the Zantiks Ymaze. 
+
+Briefly, zebrafish are raised from this cross together in the same tank, across `r meta$Tank %>% unique %>% length` lays. Each lay has come from the same parents are approx. 1 week apart in age. Each tank contained fish either WT, heterozygous or homozgous for the mutation in a 1:2:1 ratio. 
+
+Fish were isolated for 30 mins two at a time, then placed in the maze for 1 hour. Raw data was collected, and metadata was recorded (i.e. sex, time, day). These raw data spreadsheets were batch processed in the naglu 3, BatchProcess R script to produce the `final_data` object. This object contains the tetragram frequencies (see below). Note that fish were genotyped after data collection so that we are blinded from any observer bias until after raw data collection. 
+
+```{r}
+final_data %>% 
+  head %>% 
+  kable(caption = "Example of the processed data") %>% 
+  kable_styling()
+```
+
+# check genotype proportions
+
+First, I will check that genotype proportions are as expected. A few less homs are observed
+```{r}
+meta %>% 
+  ggplot(aes(Genotype, fill = Genotype)) +
+  geom_bar(colour = "black")+
+  scale_fill_viridis_d()
+```
+
+Fish show a tendency to explore a new arm of the maze rather than returning to the arm that was most recently visited. When the fish chooses a different arm than the one it just exited, this choice is called an alternation. Alternation percentage is a measure of working memory. A subject with impaired spatial working memory will show decreased pure alternation as indicated by a low percentage of alternation.
+
+The plots below show the raw counts of each of the possible tetragrams. We can see some fish were quite inactive, wih low total number of tetragrams. i.e. fish 41.
+
+```{r fig.height = 20, fig.width = 20}
+final_data %>%
+  dplyr::filter(Keep == "Y") %>% 
+  gather(key = "tetras", value = "Count", # convert to long format
+         grep("[L|R]{4}", 
+              colnames(.))
+         ) %>% 
+  group_by(fish_id, tetras) %>% 
+  summarize(x = sum(Count))  %>% #calculate the sum over the 6 x 10 minute 'bins
+  ggplot(aes(x = tetras, y = x, fill = tetras)) + 
+  geom_col()+
+  facet_wrap(~fish_id, ncol = 10, scales = "free") +
+  theme_bw() +
+  ylab("Counts of each tetragram") +
+  theme(axis.text.x = element_blank(), 
+        legend.position = "top") +
+  ggtitle("Distribution of memory patterns per fish")
+```
+
+
+
+# Visualisation of raw data
+
+Cleal et al. showed that zebrafish naturally perform more of the alternation tetragrams (LRLR and RLRL) in a Y-maze. This is obsevred in our data. 
+
+
+We can also display this as the *relative* amount of alternation tetragrams performed by zebrafish in a 1 hour search period. This will control for how active each fish is. 
+
+```{r}
+final_data %>% 
+  dplyr::filter(Keep == "Y") %>% 
+    gather(key = 'tetras', value = 'count', grep("[L|R]{4}", colnames(.))) %>% 
+  dplyr::distinct(rel_alts, .keep_all = T) %>% 
+  ggplot(aes(x = Genotype, y = rel_alts, fill = Genotype)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(aes(shape = Sex)) +
+  facet_wrap(~bin, nrow = 1) +
+  ylab("Relative alteration frequency (LRLR + RLRL)/total_tetras") +
+  theme_bw() +
+  theme(axis.text.x  = element_text(angle = 45, hjust = 1, vjust = 1)) 
+```
+
+## Locomotor defect 
+
+Alteration to locomotor activity could be a confounding effect with genotype to alternation frequency. If the mutant fish had some form of locomotor change, they could be performing more or less alternation tetragrams not due to impairment of spatial working memory. To account for this, I tested whether the genotype of the fish had a significant effect on 1) the total number of turns the fish performed in the hour spent in the maze or 2) the average time spent in each zone of the maze. 
+
+
+```{r}
+final_data %>% 
+  dplyr::filter(Keep == "Y") %>% 
+  group_by(fish_id) %>% 
+  mutate(sum_turns = sum(total_turns)) %>% 
+  dplyr::select(colnames(meta), sum_turns) %>% 
+  unique %>% 
+  ggplot(aes(x = Genotype,y = sum_turns)) +
+  geom_quasirandom(aes(shape = Sex)) +
+  geom_boxplot(aes(fill = Genotype), 
+               alpha = 0.5, 
+               outlier.shape = NA) + # dont show the outliers
+  scale_fill_viridis_d() +
+  ylab("Total number of turns") +
+  ggtitle("Total number of turns performed by fish in the Y-maze in 1 hour")
+
+final_data %>% 
+  dplyr::filter(Keep == "Y") %>% 
+  group_by(fish_id) %>% 
+  mutate(sum_turns = sum(total_turns)) %>% 
+  dplyr::select(colnames(meta), sum_turns) %>% 
+  unique %>% 
+  glm.nb(sum_turns ~ Genotype + Sex + Tank, 
+         data = .) %>% 
+  summary %>%  
+  .$coef %>% 
+  kable(caption = "Negative binomial GLM model coefficients. 
+        None of the factors have a significant effect on the total number of turns" ) %>% 
+  kable_styling()
+
+read_csv("naglu 3-month behaviour/naglu_3m_time_in_zone.csv") %>% 
+  mutate(fish_id = as.character(fish_id)) %>% 
+  dplyr::select(fish_id, bin, zone, time_in_zone) %>% 
+  left_join(meta) %>% 
+  dplyr::filter(Keep == "Y") %>% 
+  group_by(fish_id, zone) %>% 
+  mutate(total_timeInZone = sum(time_in_zone)) %>% 
+  dplyr::distinct(total_timeInZone, .keep_all = TRUE) %>% 
+  ggplot(aes(x = Genotype, y = total_timeInZone/60)) +
+  geom_quasirandom(aes(shape=Sex)
+                  ) +
+  geom_boxplot(aes(fill = Genotype), 
+               outlier.shape = NA, 
+                alpha = 0.5) +
+  facet_wrap(~zone, nrow = 1) +
+  scale_y_log10() +
+  ylab("Total time spent in each zone (mins)") +
+  scale_fill_viridis_d() +
+  ggtitle("Total time spent in each zone")
+
+read_csv("naglu 3-month behaviour/naglu_3m_time_in_zone.csv") %>% 
+  mutate(fish_id = as.character(fish_id)) %>% 
+  dplyr::select(fish_id, bin, zone, time_in_zone) %>% 
+  left_join(meta) %>% 
+  dplyr::filter(Keep == "Y") %>% 
+  group_by(fish_id, zone) %>% 
+  mutate(aveTimeInZone = mean(time_in_zone)) %>% 
+  dplyr::distinct(aveTimeInZone, .keep_all = TRUE) %>% 
+  ggplot(aes(x = Genotype, y = aveTimeInZone)) +
+  geom_quasirandom(aes(shape=Sex)
+                  ) +
+  geom_boxplot(aes(fill = Genotype), 
+               outlier.shape = NA, 
+                alpha = 0.5) +
+  facet_wrap(~zone, nrow = 1) +
+  scale_fill_viridis_d() +
+  scale_y_log10() +
+  ylab("Average time spent in each zone") +
+  ggtitle("Average time spent in each zone")
+
+read_csv("naglu 3-month behaviour/naglu_3m_time_in_zone.csv") %>% 
+  mutate(fish_id = as.character(fish_id)) %>% 
+  dplyr::select(fish_id, bin, zone, time_in_zone) %>% 
+  left_join(meta) %>% 
+  dplyr::filter(Keep == "Y") %>% 
+  group_by(fish_id, zone) %>% 
+  mutate(aveTimeInZone = mean(time_in_zone)) %>% 
+  dplyr::distinct(aveTimeInZone, .keep_all = TRUE) %>% 
+  lm(log(aveTimeInZone) ~ (Genotype + zone)^2, 
+    data = .) %>% 
+  summary %>% 
+  .$coef %>% 
+  kable %>% 
+  kable_styling()
+```
+
+
+
+```{r}
+#also visualise the alternations per bin per fish
+final_data %>% 
+  dplyr::filter(Keep == "Y") %>% 
+  gather(key = 'tetras', value = 'count', grep("[L|R]{4}", colnames(.))) %>% 
+  dplyr::distinct(rel_alts, .keep_all = T) %>%
+  ggplot(aes(x = Genotype, y = alts, fill = Genotype)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(aes(shape = Sex)) +
+  facet_wrap(~bin, nrow = 1) +
+  theme_bw() +
+  theme(axis.text.x  = element_text(angle = 45, hjust = 1, vjust = 1)) +
+  ylab("Frequency of alternation tetragrams (LRLR + RLRL)") +
+  coord_cartesian(ylim = c(0, 100)) + # zoom in
+  scale_fill_viridis_d()
+```
+
+
+
+```{r}
+temp <- final_data %>% 
+  dplyr::filter(Keep == "Y") %>% 
+  mutate(
+    dayTime = interaction(Day, Time, drop = T),
+    non_alts = total_turns - alts,
+    obs = 1:nrow(.),
+    bin = as.character(bin)
+  ) %>% 
+  glmmTMB(
+    cbind(alts, non_alts) ~ (bin + Genotype)^2 + Time + Sex + (1|Day) + (1|fish_id) + (1|dayTime),
+    family = betabinomial(),
+    data = .
+  ) 
+
+Anova(temp)
+  
+print(emmeans(temp, specs = "Genotype"),type = "response") %>% 
+  as_tibble() %>% 
+  ggplot(aes(Genotype, prob, colour = Genotype)) +
+  geom_point(size = 5, 
+             position = position_dodge(width = 0.5)) +
+  geom_errorbar(
+    aes(ymin = lower.CL, ymax = upper.CL), 
+    width = 0.5,
+    size = 1,
+    position = position_dodge(width = 0.5)
+    ) +
+  ylab("Estimated probability of alternation") +
+  xlab("Time interval") +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(hjust = 1, 
+                               vjust = 1, 
+                               angle = 45)
+    ) +
+  ggtitle("naglu 3 months", 
+          subtitle = "Effect of Genotype p = 0.07")
+
+print(emmeans(temp, specs = "bin", by = "Genotype"), type = "response") %>% 
+  as_tibble() %>% 
+  ggplot(aes(bin, prob, colour = Genotype)) +
+  geom_point(size = 2, 
+             position = position_dodge(width = 0.5)) +
+  geom_errorbar(
+    aes(ymin = lower.CL, ymax = upper.CL), 
+    width = 0.5, 
+    position = position_dodge(width = 0.5)
+  ) +
+  scale_y_continuous(limits = c(0, 0.5)) +
+  ylab("Estimated probability of \nalternation") +
+  xlab("Time interval") +
+  theme_set(theme_bw(base_size = 8)) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(hjust = 1, 
+                               vjust = 1, 
+                               angle = 45)
+  )
+```
+
+
