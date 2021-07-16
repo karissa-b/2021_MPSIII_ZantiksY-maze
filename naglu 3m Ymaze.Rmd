@@ -80,9 +80,17 @@ final_data <- read_csv("naglu_3m_final_output.csv") %>%
 
 # Introduction
 
-In this analysis, I will analyse Ewans raw data generated for zebrafish arising from a *naglu* A603fs het x het lay in the Zantiks Ymaze. 
+In this analysis, I will analyse Ewans raw data generated for zebrafish arising from a lay from the same *naglu* A603fs het x het parents in the Zantiks Y-maze. 
 
-Briefly, zebrafish are raised from this cross together in the same tank, across `r meta$Tank %>% unique %>% length` lays. Each lay has come from the same parents are approx. 1 week apart in age. Each tank contained fish either WT, heterozygous or homozgous for the mutation in a 1:2:1 ratio. 
+Briefly, zebrafish are raised from this cross together in the same tank, across `r meta$Tank %>% unique %>% length` lays. Each lay has come from the same parents are approx. 1 week apart in age. Each tank contained fish either WT, heterozygous or homozgous for the mutation in a 1:2:1 ratio. A summary of the fish used in this experiment can be found in the table below.
+```{r}
+meta %>% 
+  group_by(Tank, Genotype) %>% 
+  summarise(n = n()) %>% 
+  kable(caption = "Number of fish per tank and genotype") %>% 
+  kable_styling(full_width = FALSE)
+```
+
 
 Fish were isolated for 30 mins two at a time, then placed in the maze for 1 hour. Raw data was collected, and metadata was recorded (i.e. sex, time, day). These raw data spreadsheets were batch processed in the naglu 3, BatchProcess R script to produce the `final_data` object. This object contains the tetragram frequencies (see below). Note that fish were genotyped after data collection so that we are blinded from any observer bias until after raw data collection. 
 
@@ -95,7 +103,7 @@ final_data %>%
 
 # check genotype proportions
 
-First, I will check that genotype proportions are as expected. A few less homs are observed than expected.
+First, I will check that genotype proportions are as expected. A few less homozygous fish are observed than expected.
 ```{r}
 meta %>% 
   ggplot(aes(Genotype, fill = Genotype)) +
@@ -103,7 +111,7 @@ meta %>%
   scale_fill_viridis_d()
 ```
 
-Fish show a tendency to explore a new arm of the maze rather than returning to the arm that was most recently visited. When the fish chooses a different arm than the one it just exited, this choice is called an alternation. Alternation percentage is a measure of working memory. A subject with impaired spatial working memory will show decreased pure alternation as indicated by a low percentage of alternation.
+# Visualisation of raw data
 
 The plots below show the raw counts of each of the possible tetragrams. We can see some fish were quite inactive, wih low total number of tetragrams. i.e. fish 41.
 
@@ -120,16 +128,14 @@ final_data %>%
   geom_col()+
   facet_wrap(~fish_id, ncol = 10, scales = "free") +
   theme_bw() +
-  ylab("Counts of each tetragram") +
+  labs(y = "Counts of each tetragram", 
+       fill = "Tetragram") +
   theme(axis.text.x = element_blank(), 
         legend.position = "top") +
   ggtitle("Distribution of memory patterns per fish")
 ```
 
-
-# Visualisation of raw data
-
-Cleal et al. showed that zebrafish naturally perform more of the alternation tetragrams (LRLR and RLRL) in a Y-maze. This is obsevred in our data. 
+Cleal et al. showed that zebrafish naturally perform more of the alternation tetragrams (LRLR and RLRL) in a Y-maze. This is also obsevred in our data here. 
 
 ```{r}
 final_data %>% 
@@ -147,9 +153,26 @@ final_data %>%
   labs(y = "Number of tetragrams", 
        colour = "Tetragram", 
        x = "Tetragram")+
-  theme(legend.position = "bottom") 
+  theme(legend.position = "bottom")  +
+  ggtitle("Total number of 16 possible tetragrams performed by zebrafish in a Y-maze\nduring a 1 hour search period")
 ```
 
+We can also visualise the number of tetragrams that the fish performed across the time bins (i.e. 0-10 mins, 10-20 mins etc.). Note that the scales for each facet are different in these plots. 
+
+```{r fig.height = 20, fig.width = 20}
+final_data %>% 
+  gather(key = 'tetras', value = 'count', grep("[L|R]{4}", colnames(.))) %>% 
+  mutate(bin = as.character(bin)) %>% 
+  ggplot(aes(x = bin, y = count)) +
+  geom_jitter(aes(colour = Genotype, 
+                  shape = Sex)) +
+  geom_boxplot(outlier.shape = NA, 
+               aes(fill = Genotype)) +
+  scale_fill_viridis_d() +
+  facet_wrap(~tetras, ncol = 2, scales = "free")
+```
+
+Since the alternation tetra
 ```{r}
 final_data %>% 
   gather(key = 'tetras', value = 'count', grep("[L|R]{4}", colnames(.))) %>% 
@@ -275,6 +298,7 @@ read_csv("naglu_3m_time_in_zone.csv") %>%
 ```
 
 ## check for handedness
+
 ```{r}
 LR_Bias <- final_data %>% 
   dplyr::select(L, R, total_turns, fish_id) %>% 
@@ -292,6 +316,18 @@ LR_Bias <- final_data %>%
   mutate(L_R_bias = factor(L_R_bias, 
                            levels = c("Neither", "Left", "Right"))
   )
+
+final_data %>% 
+  left_join(LR_Bias) %>% 
+  group_by(fish_id) %>% 
+  mutate(L = sum(L), 
+         R = sum(R), 
+         total_turns = sum(total_turns)
+  ) %>% 
+  ggplot(aes(L, R, colour = Genotype)) +
+  geom_point(aes(shape = L_R_bias), 
+             size = 4) +
+  geom_smooth(method = "lm", se = F)
 ```
 
 
@@ -321,20 +357,18 @@ Anova(glm) %>%
   
 print(emmeans(glm, specs = "Genotype"), type = "response") %>% 
   as_tibble() %>% 
-  mutate(Genotype = 
-           case_when(
-             Genotype == "wt" ~ "+/+", 
-             Genotype == "het" ~ "A603fs/+", 
-             Genotype == "hom" ~ "A603fs/A603fs")) %>% 
+  mutate(Genotype = case_when(
+    Genotype == "wt" ~ "+/+", 
+    Genotype == "het" ~ "A603fs/+", 
+    Genotype == "hom" ~ "A603fs/A603fs")) %>% 
   ggplot(aes(Genotype, prob, colour = Genotype)) +
   geom_point(size = 5, 
              position = position_dodge(width = 0.5)) +
-  geom_errorbar(
-    aes(ymin = lower.CL, ymax = upper.CL), 
-    width = 0.5,
-    size = 1,
-    position = position_dodge(width = 0.5)
-    ) +
+  geom_errorbar(aes(ymin = lower.CL, ymax = upper.CL), 
+                width = 0.5,
+                size = 1,
+                position = position_dodge(width = 0.5)
+  ) +
   ylab("Estimated probability of alternation") +
   xlab("Time interval") +
   theme_bw() +
@@ -342,11 +376,11 @@ print(emmeans(glm, specs = "Genotype"), type = "response") %>%
     axis.text.x = element_text(hjust = 1, 
                                vjust = 1, 
                                angle = 45)
-    ) +
+  ) +
   scale_y_continuous(limits = c(0,0.4)) +
   scale_color_viridis_d(end = 0.8, option = "inferno") +
   ggtitle("GLM predicted probability of zebrafish performing an alternation\ntetragram at 3 months of age", 
-          subtitle = "Effect of Genotype p = 0.058")
+          subtitle = "Effect of Genotype from GLM: p = 0.058")
 
 print(emmeans(glm, specs = "L_R_bias"), type = "response") %>% 
   as_tibble() %>% 
@@ -368,8 +402,9 @@ print(emmeans(glm, specs = "L_R_bias"), type = "response") %>%
                                angle = 45)
     ) +
   scale_y_continuous(limits = c(0,0.4)) +
+  scale_color_viridis_d(end = 0.8, option = "viridis") +
   ggtitle("naglu 3 months", 
-          subtitle = "Effect of Genotype p = 0.07")
+          subtitle = "Effect of L or R Bias p = 0.001")
 
 print(emmeans(glm, specs = "bin", by = "Genotype"), type = "response") %>% 
   as_tibble() %>% 
